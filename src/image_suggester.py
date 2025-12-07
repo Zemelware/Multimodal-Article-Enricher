@@ -151,10 +151,19 @@ Your task is to analyze an article and suggest optimal locations for images. For
 - The type of image that would be most appropriate (e.g., "photo", "diagram", "infographic", "chart", "illustration")
 - A search query that could be used to find a suitable image
 - Alt text hint for accessibility
+- Caption hint: a short, engaging caption to place below the image in the article
 - A priority score (0.0 to 1.0) indicating how important/valuable this image placement would be
 - Recommended image dimensions ({"width": integer, "height": integer} in pixels) that best suit the Grokipedia site layout and the suggested image's role in the article
 
-CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra text):
+CRITICAL: Your response must consist SOLELY of the valid JSON object shown below. NO additional text, markdown, code blocks, or explanations before/after. Ensure perfect JSON syntax:
+
+- All strings in double quotes
+- Numbers (priority, dimensions) unquoted
+- Null for paragraph_id when no specific paragraph (use string "null" only if needed, but prefer actual null)
+- Commas between fields/items, NO trailing commas
+- Every slot MUST have exactly these fields: section_id (str), paragraph_id (str or null), position (str), image_type (str), search_query (str), alt_text_hint (str), caption_hint (str), priority (float 0.0-1.0), recommended_dimensions ({"width": int, "height": int})
+- Suggest up to {max_slots} slots, but can be fewer
+- Match the structure precisely
 
 {
   "slots": [
@@ -165,6 +174,7 @@ CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra tex
       "image_type": "photo",
       "search_query": "young elon musk childhood photo",
       "alt_text_hint": "Elon Musk as a child.",
+      "caption_hint": "Early childhood photo of Elon Musk, displaying the curiosity that would lead to his technological innovations.",
       "priority": 0.9,
       "recommended_dimensions": {"width": 600, "height": 400}
     },
@@ -175,6 +185,7 @@ CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra tex
       "image_type": "diagram",
       "search_query": "falcon 9 reusable rocket diagram",
       "alt_text_hint": "Diagram of a SpaceX Falcon 9 reusable rocket.",
+      "caption_hint": "Illustration of SpaceX Falcon 9's innovative reusable rocket technology, highlighting key components for landing and relaunch.",
       "priority": 0.8,
       "recommended_dimensions": {"width": 800, "height": 600}
     }

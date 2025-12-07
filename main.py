@@ -48,46 +48,8 @@ def select_best_image_with_grok(candidates, query, api_key=None, model="grok-4-1
     )
     
     # Build message with all candidate images
-    content = [
-        {
-            "type": "text",
-            "text": f"""You are analyzing {len(candidates)} candidate images for the following context:
-
-Search Query: "{query}"
-
-Please analyze each image and determine which one is the BEST match for this query. Consider:
-- Relevance to the search query
-- Image quality and clarity
-- Appropriate content for an article
-- Professional appearance
-
-The images are numbered 0 to {len(candidates)-1} in the order they appear below.
-
-You must respond with a JSON object in exactly this format:
-{{
-  "selected_index": 2,
-  "caption": "A short, accurate caption describing what is shown in the selected image"
-}}
-
-Where:
-- "selected_index" is the index number (0 to {len(candidates)-1}) of the best image
-- "caption" is a short, accurate caption describing what is shown in the selected image"""
-        }
-    ]
-    
-    # Add each candidate image
-    for i, candidate in enumerate(candidates):
-        content.append({
-            "type": "text",
-            "text": f"\nImage {i}: {candidate.get('title', 'Untitled')}"
-        })
-        content.append({
-            "type": "image_url",
-            "image_url": {
-                "url": candidate["url"],
-                "detail": "high"
-            }
-        })
+    # Unused code block removed for cleanliness. The actual logic is in the retry loop below.
+    # (Original code built 'content' here but it was never used in API call)
     
     # Keep track of which candidates we've tried
     excluded_indices = set()
@@ -109,23 +71,28 @@ Where:
 
 Search Query: "{query}"
 
-Please analyze each image and determine which one is the BEST match for this query. Consider:
-- Relevance to the search query
-- Image quality and clarity
-- Appropriate content for an article
-- Professional appearance
+Please carefully analyze each candidate image using your vision capabilities along with the provided metadata (title, dimensions). Select the SINGLE BEST image for the search query "{query}" by evaluating these criteria in order:
+
+- RELEVANCE: Directly represents the query concept accurately and informatively
+- AUTHENTICITY: Real or professionally created; AVOID AI-generated images identifiable by watermarks (Midjourney, DALL-E, etc.), artifacts (anatomical errors, unnatural elements), or stock model poses
+- ORIENTATION: Prefer landscape (width > height); strongly deprioritize portrait (height > width) unless uniquely suitable
+- QUALITY: High resolution, sharp focus, good lighting; reject blurry, low-res, or distorted
+- CLEANLINESS: Free of watermarks, text overlays, logos, ads, or extraneous elements
+- APPROPRIATENESS: Suitable for educational article - professional, non-offensive, contextually fitting
+- COMPOSITION: Well-balanced, engaging, enhances article readability
+
+Even if options are limited, choose the highest-scoring image overall.
 
 The images are numbered 0 to {len(available_candidates)-1} in the order they appear below.
 
-You must respond with a JSON object in exactly this format:
-{{
-  "selected_index": 2,
-  "caption": "A short, accurate caption describing what is shown in the selected image"
-}}
+IMPORTANT: Respond with ONLY valid JSON matching this exact schema. No other text. Ensure:
+- selected_index is an integer between 0 and {len(available_candidates)-1} inclusive
+- caption is a concise (under 100 words), descriptive caption suitable for article use and SEO/alt text
 
-Where:
-- "selected_index" is the index number (0 to {len(available_candidates)-1}) of the best image
-- "caption" is a short, accurate caption describing what is shown in the selected image"""
+{{
+  "selected_index": 0,
+  "caption": "Description of the selected image content, highlighting key visual elements relevant to the query."
+}}"""
             }
         ]
         
@@ -133,7 +100,7 @@ Where:
         for idx, (original_idx, candidate) in enumerate(available_candidates):
             attempt_content.append({
                 "type": "text",
-                "text": f"\nImage {idx}: {candidate.get('title', 'Untitled')}"
+                "text": f"\nImage {idx}: '{candidate.get('title', 'Untitled')}' | Dimensions: {candidate.get('width', '?')}x{candidate.get('height', '?')}px | MIME: {candidate.get('mime_type', '?')} | Source: {candidate.get('source_page', 'N/A')[:60]}..."
             })
             attempt_content.append({
                 "type": "image_url",
@@ -149,7 +116,24 @@ Where:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are a helpful assistant that analyzes images and selects the best one for an article. You must output valid JSON matching the schema."
+                        "content": """You are an expert image analyst and curator for Grokipedia educational articles. Your task is to select the SINGLE MOST SUITABLE image from the candidates based on strict criteria.
+
+CRITERIA FOR SELECTION (in order of priority):
+1. RELEVANCE: Must directly illustrate the search query without misleading elements.
+2. AUTHENTICITY: Prefer real photos or diagrams. AVOID AI-generated images - reject those with watermarks (e.g., Midjourney, DALL-E, Stable Diffusion logos/text), artifacts (unnatural hands, symmetry errors, blurry details), or generic 'model' appearances.
+3. ORIENTATION: Strongly prefer landscape (width > height). Ignore or deprioritize portrait (height > width) images unless exceptionally relevant.
+4. QUALITY: High resolution, sharp, clear. Avoid blurry, pixelated, low-res images.
+5. CLEANLINESS: No visible watermarks, text overlays, logos, ads, or frames. Clean composition preferred.
+6. APPROPRIATENESS: Suitable for professional, educational content - no violence, explicit content, or poor taste.
+7. ENGAGEMENT: Well-composed, informative, visually appealing.
+
+If multiple images score similarly, choose the one with the best overall balance. ALWAYS select exactly one image, even if imperfect.
+
+Output ONLY a valid JSON object with no additional text:
+{
+  "selected_index": <integer 0 to n-1>,
+  "caption": "<1-2 sentence concise, accurate description of the image content, suitable for article caption and alt text>"
+}"""
                     },
                     {
                         "role": "user",
