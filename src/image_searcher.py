@@ -36,8 +36,9 @@ def search_images(query: str, num_results: int = 10) -> List[Dict[str, str]]:
         "cx": CX_ID,
         "q": query,
         "searchType": "image",
-        "num": min(num_results, 10),  # Max 10 per request
-        "safe": "off"  # Optional: set to "active" for safe search
+        "num": num_results,
+        "safeSearch": "active",
+        "image_as_filetype": "jpg,png,webp"
     }
     
     try:
@@ -50,11 +51,22 @@ def search_images(query: str, num_results: int = 10) -> List[Dict[str, str]]:
         
         # Extract image information
         images = []
+        
         if "items" in data:
             for item in data["items"]:
+                image_url = item.get("link", "")
+                
+                # Skip URLs with query parameters (often thumbnails/resized versions with wrong content-type)
+                if "?" in image_url and not any(ext in image_url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+                    continue
+                
+                # Skip HTTP URLs (only HTTPS supported)
+                if image_url.startswith("http://"):
+                    continue
+                
                 image_info = {
                     "title": item.get("title", ""),
-                    "url": item.get("link", ""),
+                    "url": image_url,
                     "thumbnail": item.get("image", {}).get("thumbnailLink", ""),
                     "width": item.get("image", {}).get("width", 0),
                     "height": item.get("image", {}).get("height", 0),
