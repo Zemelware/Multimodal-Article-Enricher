@@ -110,7 +110,7 @@ def inject_images_into_html(html: str, image_slots: list[dict]) -> str:
         # 2. Build <figure> element
         figure = soup.new_tag("figure", **{"class": "mm-slot"})
         img = soup.new_tag("img", src=image_url, alt=alt_text)
-        figcaption = soup.new_tag("figcaption")
+        figcaption = soup.new_tag("figcaption", style="font-size: 0.875rem; font-style: italic; text-align: center; color: #6b7280; margin-top: 0.5rem; padding: 0 1rem; line-height: 1.5;")
         figcaption.string = caption
         figure.append(img)
         figure.append(figcaption)
