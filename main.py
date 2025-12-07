@@ -10,12 +10,194 @@ import os
 import sys
 from pathlib import Path
 
+import httpx
 from dotenv import load_dotenv
+from openai import OpenAI
 
 from src.article_processor import html_to_article_view, inject_images_into_html
-from src.image_suggester import generate_image_slots
 # Import local modules
 from src.image_searcher import search_images
+from src.image_suggester import generate_image_slots
+
+
+def select_best_image_with_grok(candidates, query, api_key=None, model="grok-4-1-fast-non-reasoning"):
+    """
+    Use Grok to analyze candidate images and select the best one.
+    
+    Args:
+        candidates: List of image dicts with 'url', 'title', etc.
+        query: The search query/context for what we're looking for
+        api_key: Optional XAI API key
+        model: Grok model to use
+    
+    Returns:
+        Tuple of (index, caption) where index is the best candidate (0-based) and caption is a short description
+    """
+    if not candidates:
+        return 0, ""
+    
+    api_key = api_key or os.getenv("XAI_API_KEY")
+    if not api_key:
+        print("    Warning: No API key, using first candidate")
+        return 0, candidates[0].get("title", "")
+    
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.x.ai/v1",
+        timeout=httpx.Timeout(120.0),
+    )
+    
+    # Build message with all candidate images
+    content = [
+        {
+            "type": "text",
+            "text": f"""You are analyzing {len(candidates)} candidate images for the following context:
+
+Search Query: "{query}"
+
+Please analyze each image and determine which one is the BEST match for this query. Consider:
+- Relevance to the search query
+- Image quality and clarity
+- Appropriate content for an article
+- Professional appearance
+
+The images are numbered 0 to {len(candidates)-1} in the order they appear below.
+
+You must respond with a JSON object in exactly this format:
+{{
+  "selected_index": 2,
+  "caption": "A short, accurate caption describing what is shown in the selected image"
+}}
+
+Where:
+- "selected_index" is the index number (0 to {len(candidates)-1}) of the best image
+- "caption" is a short, accurate caption describing what is shown in the selected image"""
+        }
+    ]
+    
+    # Add each candidate image
+    for i, candidate in enumerate(candidates):
+        content.append({
+            "type": "text",
+            "text": f"\nImage {i}: {candidate.get('title', 'Untitled')}"
+        })
+        content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": candidate["url"],
+                "detail": "high"
+            }
+        })
+    
+    # Keep track of which candidates we've tried
+    excluded_indices = set()
+    max_retries = len(candidates)
+    
+    for attempt in range(max_retries):
+        # Build content with only non-excluded candidates
+        available_candidates = [(i, c) for i, c in enumerate(candidates) if i not in excluded_indices]
+        
+        if not available_candidates:
+            print(f"    All candidates failed to fetch. Skipping this image slot.")
+            return None, None
+        
+        # Rebuild content for this attempt
+        attempt_content = [
+            {
+                "type": "text",
+                "text": f"""You are analyzing {len(available_candidates)} candidate images for the following context:
+
+Search Query: "{query}"
+
+Please analyze each image and determine which one is the BEST match for this query. Consider:
+- Relevance to the search query
+- Image quality and clarity
+- Appropriate content for an article
+- Professional appearance
+
+The images are numbered 0 to {len(available_candidates)-1} in the order they appear below.
+
+You must respond with a JSON object in exactly this format:
+{{
+  "selected_index": 2,
+  "caption": "A short, accurate caption describing what is shown in the selected image"
+}}
+
+Where:
+- "selected_index" is the index number (0 to {len(available_candidates)-1}) of the best image
+- "caption" is a short, accurate caption describing what is shown in the selected image"""
+            }
+        ]
+        
+        # Add each available candidate image
+        for idx, (original_idx, candidate) in enumerate(available_candidates):
+            attempt_content.append({
+                "type": "text",
+                "text": f"\nImage {idx}: {candidate.get('title', 'Untitled')}"
+            })
+            attempt_content.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": candidate["url"],
+                    "detail": "high"
+                }
+            })
+        
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant that analyzes images and selects the best one for an article. You must output valid JSON matching the schema."
+                    },
+                    {
+                        "role": "user",
+                        "content": attempt_content
+                    }
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=3000,
+                temperature=0.3,
+            )
+            
+            raw_content = response.choices[0].message.content
+            
+            # Parse JSON manually
+            result = json.loads(raw_content)
+            
+            selected_index = result["selected_index"]
+            caption = result["caption"]
+            
+            # Map back to original candidate index
+            original_selected_index = available_candidates[selected_index][0]
+            
+            print(f"    Grok selected image {original_selected_index}: {caption}")
+            return original_selected_index, caption
+                
+        except Exception as e:
+            error_msg = str(e)
+            
+            # Check if it's an unrecoverable data loss error
+            if "Unrecoverable data loss or corruption" in error_msg:
+                print(f"    Error fetching image: {error_msg}")
+                
+                # Try to identify which image failed by checking all current candidates
+                # Since we don't know which one failed, exclude the last one tried
+                # This is a heuristic - we'll exclude candidates one by one until we find working ones
+                if available_candidates:
+                    failed_idx = available_candidates[-1][0]
+                    excluded_indices.add(failed_idx)
+                    print(f"    Excluding image {failed_idx} and retrying with remaining candidates...")
+                    continue
+            
+            # For other errors, fail immediately
+            print(f"    Error calling Grok API: {error_msg}")
+            return None, None
+    
+    # If we've exhausted all retries
+    print(f"    All candidates failed. Skipping this image slot.")
+    return None, None
 
 
 def build_image_slots_from_specs(slot_specs):
@@ -35,11 +217,18 @@ def build_image_slots_from_specs(slot_specs):
             print(f"    No images found for '{query}'")
             continue
 
-        # simplest: just take top candidate
-        top = candidates[0]
+        # Use Grok to select the best image from candidates
+        print(f"    Selecting best image with Grok...")
+        best_index, caption = select_best_image_with_grok(candidates, query)
+        
+        # Skip this slot if no valid image was found
+        if best_index is None or caption is None:
+            print(f"    Skipping slot - no valid image available")
+            continue
+        
+        top = candidates[best_index]
 
         alt_text = spec.get("alt_text_hint") or top.get("title") or ""
-        caption = spec.get("caption_hint") or top.get("title") or ""
 
         image_slots.append({
             "section_id": spec["section_id"],
@@ -100,7 +289,7 @@ def main(html_file_path):
     enhanced_html = inject_images_into_html(mutated_html, final_slots)
     
     # Create output directory and save final file
-    output_dir = Path("data/enhanced")
+    output_dir = Path("data/output")
     output_dir.mkdir(parents=True, exist_ok=True)
     input_stem = Path(html_file_path).stem
     output_html_path = output_dir / f"{input_stem}_enhanced.html"

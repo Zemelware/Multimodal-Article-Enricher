@@ -18,14 +18,15 @@ Requires:
 Grok suggests slots with section/paragraph positions, image types, search queries, alt/caption hints, priority scores, and recommended dimensions for site-suited embedding.
 """
 
+import json
 import os
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
-import json
 import httpx
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
+
 
 def _format_article_for_grok(article: Dict[str, Any]) -> str:
     """
@@ -150,7 +151,6 @@ Your task is to analyze an article and suggest optimal locations for images. For
 - The type of image that would be most appropriate (e.g., "photo", "diagram", "infographic", "chart", "illustration")
 - A search query that could be used to find a suitable image
 - Alt text hint for accessibility
-- Caption hint for the image
 - A priority score (0.0 to 1.0) indicating how important/valuable this image placement would be
 - Recommended image dimensions ({"width": integer, "height": integer} in pixels) that best suit the Grokipedia site layout and the suggested image's role in the article
 
@@ -165,7 +165,6 @@ CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra tex
       "image_type": "photo",
       "search_query": "young elon musk childhood photo",
       "alt_text_hint": "Elon Musk as a child.",
-      "caption_hint": "Elon Musk during his early years in South Africa.",
       "priority": 0.9,
       "recommended_dimensions": {"width": 600, "height": 400}
     },
@@ -176,7 +175,6 @@ CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra tex
       "image_type": "diagram",
       "search_query": "falcon 9 reusable rocket diagram",
       "alt_text_hint": "Diagram of a SpaceX Falcon 9 reusable rocket.",
-      "caption_hint": "A simplified view of SpaceX's reusable Falcon 9 rocket.",
       "priority": 0.8,
       "recommended_dimensions": {"width": 800, "height": 600}
     }
@@ -197,7 +195,6 @@ GUIDELINES:
 - Priority: 0.9-1.0 for critical images, 0.7-0.8 for important, 0.5-0.6 for nice-to-have, below 0.5 for optional
 - Search queries should be specific and descriptive
 - Alt text hints should be concise and descriptive
-- Caption hints should provide context or additional information
 - Recommended dimensions: Provide {"width": px, "height": px} suitable for embedding in Grokipedia articles. The site features a modern, responsive layout with Tailwind CSS. Tailor sizes to:
   * Hero or lead images (e.g., after title or key sections): 1200x675 or similar wide aspect
   * Inline images within paragraphs: 600x400 to 800x600 for readability without overwhelming text
@@ -285,7 +282,7 @@ Return ONLY the JSON object with the slots array, no additional text or markdown
 
 if __name__ == "__main__":
     import sys
-    
+
     # Default to article_view.json and image_slots.json
     input_file = "article_view.json"
     output_file = "image_slots.json"
