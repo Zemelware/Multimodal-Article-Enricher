@@ -140,6 +140,8 @@ Your task is to analyze an article and suggest optimal locations for custom widg
 - "stat_cards": Grid of cards for notable numerical facts (net worth, employees, speeds, distances). Data schema: List of dicts with 'label', 'value', 'note' (optional).
 - "key_definitions": Framed box for important terminology or concepts. Data schema: List of dicts with 'term', 'definition'.
 
+CRITICAL: Use ONLY information that appears in the article. DO NOT add external knowledge, make up facts, or include information not present in the provided text. Only suggest widgets for content that actually exists in the article.
+
 For each suggested widget slot, provide:
 - The exact section_id and paragraph_id (or null if placing after heading or section-wide)
 - The position relative to the content (e.g., "after", "after_heading", "before")
@@ -185,7 +187,8 @@ GUIDELINES:
 - Content hints should reference specific article elements to extract/generate from
 - Priority: 0.9-1.0 essential, 0.6-0.8 valuable, lower optional
 - Dimensions: Tailor to type - timelines wider, facts narrower sidebars; consider responsive design with Tailwind classes in mind
-- Avoid over-suggestion; focus on 3-5 high-impact placements per article"""
+- Avoid over-suggestion; focus on 3-5 high-impact placements per article
+- NEVER invent or add information: Only suggest widgets for content explicitly present in the article text"""
         },
         {
             "role": "user",
