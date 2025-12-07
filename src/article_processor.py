@@ -82,56 +82,97 @@ def html_to_article_view(html: str) -> tuple[str, dict]:
     return mutated_html, article_view
 
 
-def inject_images_into_html(html: str, image_slots: list[dict]) -> str:
-    """Insert <figure> elements into mutated HTML according to image slots."""
+def inject_slots_into_html(html: str, slots: list[dict]) -> str:
+    """Insert images (<figure class="mm-slot">) and widgets (<div class="widget-slot">) into mutated HTML according to slots list.
 
+    Slot formats:
+    - Image: {"section_id": str, "paragraph_id": str|None, "position": str, "image_url": str, "alt_text": str, "caption": str}
+    - Widget: {"section_id": str, "paragraph_id": str|None, "position": str, "widget_type": str, "widget_html": str}
+    """
     soup = BeautifulSoup(html, "html.parser")
 
-    for slot in image_slots:
+    for slot in slots:
         section_id = slot.get("section_id")
         paragraph_id = slot.get("paragraph_id")
         position = slot.get("position", "after")
-        image_url = slot.get("image_url")
-        alt_text = slot.get("alt_text", "")
-        caption = slot.get("caption", "")
 
-        if not image_url:
+        insert_elem = None
+        anchor = None
+
+        if "image_url" in slot:
+            # Handle image slot
+            image_url = slot["image_url"]
+            alt_text = slot.get("alt_text", "")
+            caption = slot.get("caption", "")
+            if not image_url:
+                continue
+
+            # Find anchor
+            if paragraph_id is not None:
+                anchor = soup.find(id=paragraph_id)
+            if anchor is None and section_id is not None:
+                anchor = soup.find(id=section_id)
+            if anchor is None:
+                continue
+
+            # Build figure
+            figure = soup.new_tag("figure", **{"class": "mm-slot image-slot"})
+            img = soup.new_tag("img", src=image_url, alt=alt_text)
+            figure.append(img)
+            if caption:
+                figcaption = soup.new_tag("figcaption", style="font-size: 0.875rem; font-style: italic; text-align: center; color: #6b7280; margin-top: 0.5rem; padding: 0 1rem; line-height: 1.5;")
+                figcaption.string = caption
+                figure.append(figcaption)
+            insert_elem = figure
+
+        elif "widget_html" in slot:
+            # Handle widget slot
+            widget_type = slot.get("widget_type", "unknown")
+            widget_html = slot["widget_html"]
+            if not widget_html:
+                continue
+
+            # Find anchor
+            if paragraph_id is not None:
+                anchor = soup.find(id=paragraph_id)
+            if anchor is None and section_id is not None:
+                anchor = soup.find(id=section_id)
+            if anchor is None:
+                continue
+
+            # Build widget container
+            widget_div = soup.new_tag("div", **{"class": f"widget-slot widget-{widget_type}"})
+
+            # Parse and append widget HTML content
+            inner_soup = BeautifulSoup(widget_html, "html.parser")
+            for child in list(inner_soup.children):
+                widget_div.append(child)
+            insert_elem = widget_div
+
+        else:
+            print(f"Warning: Unknown slot type in {slot}")
             continue
 
-        # 1. Find anchor element
-        anchor = None
-        if paragraph_id is not None:
-            anchor = soup.find(id=paragraph_id)
-        if anchor is None and section_id is not None:
-            anchor = soup.find(id=section_id)
-        if anchor is None:
-            continue  # nowhere to attach
+        if insert_elem is None or anchor is None:
+            continue
 
-        # 2. Build <figure> element
-        figure = soup.new_tag("figure", **{"class": "mm-slot"})
-        img = soup.new_tag("img", src=image_url, alt=alt_text)
-        figcaption = soup.new_tag("figcaption", style="font-size: 0.875rem; font-style: italic; text-align: center; color: #6b7280; margin-top: 0.5rem; padding: 0 1rem; line-height: 1.5;")
-        figcaption.string = caption
-        figure.append(img)
-        figure.append(figcaption)
-
-        # 3. Insert figure relative to anchor
+        # Insert relative to anchor (shared logic)
         if position == "before":
-            anchor.insert_before(figure)
+            anchor.insert_before(insert_elem)
         elif position == "before_heading":
-            heading_anchor = soup.find(id=section_id) if section_id else None
+            heading_anchor = soup.find(id=section_id) if section_id else anchor
             if heading_anchor:
-                heading_anchor.insert_before(figure)
+                heading_anchor.insert_before(insert_elem)
             else:
-                anchor.insert_before(figure)
+                anchor.insert_before(insert_elem)
         elif position == "after_heading":
-            heading_anchor = soup.find(id=section_id) if section_id else None
+            heading_anchor = soup.find(id=section_id) if section_id else anchor
             if heading_anchor:
-                heading_anchor.insert_after(figure)
+                heading_anchor.insert_after(insert_elem)
             else:
-                anchor.insert_after(figure)
+                anchor.insert_after(insert_elem)
         else:  # default "after"
-            anchor.insert_after(figure)
+            anchor.insert_after(insert_elem)
 
     enhanced_html = str(soup)
     return enhanced_html
@@ -189,7 +230,7 @@ if __name__ == "__main__":
         },
     ]
 
-    enhanced_html = inject_images_into_html(mutated_article, image_slots)
+    enhanced_html = inject_slots_into_html(mutated_article, image_slots)
     # save enhanced_html to file
     output_path = Path("test_stuff/enhanced_article.html")
     output_path.write_text(enhanced_html, encoding="utf-8")

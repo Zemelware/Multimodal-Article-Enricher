@@ -1,6 +1,6 @@
-# Grokipedia Image Enhancement Workflow
+# Grokipedia Image and Widget Enhancement Workflow
 
-This README outlines the end-to-end workflow for scraping Grokipedia articles, suggesting image placements via Grok API, searching for images, and inserting them into HTML for a visually enhanced article. 
+This README outlines the end-to-end workflow for scraping Grokipedia articles, suggesting and generating both image placements and custom widget components (e.g., timelines, fact panels) via Grok API, searching for images, validating widget suitability, and inserting everything into HTML for an enhanced, interactive article. 
 
 The process focuses on preserving original styling (inlined CSS) and using structured IDs for precise placements. The workflow is now fully implemented and chained via main.py for end-to-end processing.
 
@@ -17,7 +17,10 @@ Use `main.py` for the full automated pipeline on scraped HTML:
 
 - **Prep**: `pip install -r requirements.txt` and set API keys in `.env`.
 - **Scrape** (if needed): Create `urls.txt` (one URL per line, e.g., https://grokipedia.com/page/Elon_Musk), run `python html_scraper.py --input-file urls.txt` → creates `data/pages/*.html` (default).
-- **Enhance**: `python main.py data/pages/article.html` → generates `data/enhanced/article_enhanced.html` with images suggested by Grok, searched via Google, and inserted using IDs.
+- **Enhance**: `python main.py data/pages/article.html` → generates `data/output/{article_stem}_enhanced.html` with:
+  - Images: Grok-suggested slots, searched via Google Custom Search, best selected via Grok vision analysis, inserted as <figure> with captions.
+  - Widgets: Grok-suggested slots (e.g., timeline, key_facts), suitability validated per section via Grok, generated as self-contained HTML/CSS components, inserted as <div class="widget-slot">.
+  All positioned precisely using injected IDs.
 - **View**: `open data/enhanced/article_enhanced.html` or serve locally.
 
 **Notes**: 

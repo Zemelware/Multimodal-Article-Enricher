@@ -1,8 +1,16 @@
 """
-1. Take an article and convert to JSON
-2. Generate image slots JSON
-3. Search for 1 image per query using the queries in image slots and convert to image slots with URLs
-4. Use inject_images_into_html to insert image slots back into HTML
+Workflow for enhancing Grokipedia articles with images and custom widgets:
+
+1. Read HTML article file
+2. Convert to structured Article View JSON and inject IDs into HTML (mutated_html)
+3. Generate image slot suggestions using Grok API
+4. For each image spec: search external images, use Grok vision to select best, build image slots
+5. Generate widget slot suggestions using Grok API (e.g., timelines, fact panels)
+6. For each widget spec: extract section context, use Grok to validate suitability and generate self-contained HTML component
+7. Inject both image figures and widget divs into mutated HTML at suggested positions
+8. Save enhanced HTML file
+
+Requires XAI_API_KEY for Grok API calls (image selection, slot suggestions, widget generation).
 """
 
 import json
@@ -14,10 +22,12 @@ import httpx
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from src.article_processor import html_to_article_view, inject_images_into_html
+from src.article_processor import html_to_article_view, inject_slots_into_html
 # Import local modules
 from src.image_searcher import search_images
 from src.image_suggester import generate_image_slots
+from src.widget_suggester import generate_widget_slots
+from src.widget_components import render_widget, WIDGET_TYPES
 
 
 def select_best_image_with_grok(candidates, query, api_key=None, model="grok-4-1-fast-non-reasoning"):
@@ -237,6 +247,218 @@ def build_image_slots_from_specs(slot_specs):
 
     return image_slots
 
+
+def assess_and_extract_data(context_text, content_hint, widget_type, api_key=None, model="grok-4-1-fast-non-reasoning"):
+    """
+    Use Grok to assess suitability of widget type for context and extract structured data if suitable.
+    Returns tuple: (score, reason, extracted_data)
+    - score: float 0.0-1.0 suitability score
+    - reason: str explanation
+    - extracted_data: data structure matching widget schema or None if unsuitable/insufficient
+    Render with render_widget(widget_type, extracted_data) if data not None.
+    On error, returns (0.0, error_msg, None)
+    """
+    api_key = api_key or os.getenv("XAI_API_KEY")
+    if not api_key:
+        print("    No XAI_API_KEY, skipping widget generation")
+        return 0.0, "No API key provided", None
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://api.x.ai/v1",
+        timeout=httpx.Timeout(120.0),
+    )
+
+    # Get schema hint for this type
+    schema_hint = WIDGET_TYPES.get(widget_type, {}).get("data_schema", "JSON object with relevant structured data (e.g., list of items, events, or rows).")
+
+    # Example data for prompt based on widget type
+    if widget_type == "timeline":
+        example_data = '[ {{"date": "1971", "title": "Birth", "description": "Born in Pretoria, South Africa."}}, {{"date": "1989", "title": "Move to Canada", "description": "Emigrated at age 17."}}, {{"date": "2002", "title": "SpaceX Founded", "description": "Established SpaceX with $100M from PayPal sale."}} ]'
+    elif widget_type == "key_facts":
+        example_data = '[ "Born June 28, 1971, in Pretoria, South Africa.", "Co-founder of PayPal, sold for $1.5B in 2002.", "CEO and product architect of Tesla since 2008.", "Founder and CEO of SpaceX since 2002.", "Net worth estimated at $250B+ as of 2024.", "South African, Canadian, and US citizen." ]'
+    elif widget_type == "key_locations":
+        example_data = '[ {{"name": "Pretoria, South Africa", "lat": -25.7461, "lng": 28.1881, "description": "Birthplace and early childhood home."}}, {{"name": "Toronto, Canada", "lat": 43.6532, "lng": -79.3832, "description": "Lived after moving from South Africa in 1989."}}, {{"name": "Hawthorne, California, USA", "lat": 33.9162, "lng": -118.3361, "description": "SpaceX headquarters location."}} ]'
+    else:
+        example_data = 'null  # No example for unknown type'
+
+    system_prompt = f"""You are an expert content analyst extracting structured data for custom widget components in educational articles.
+
+TASK:
+1. Assess suitability of '{widget_type}' widget for the context_text and content_hint.
+   - Criteria: Does content have fitting elements? (timeline: chronology/events; key_facts: stats/highlights; comparison_table: comparable items; quote_block: quotes; etc.)
+   - Score 0.0-1.0: High if data-rich for type and adds unique value; low if mismatched or redundant.
+2. If score >= 0.5, extract 'extracted_data' as structured JSON matching this schema: {schema_hint}
+   - Derive from context_text and content_hint: Be accurate, concise, relevant. Limit items (4-10).
+   - Examples:
+     - Timeline: Extract chronological events with date/title/desc.
+     - Key facts: 5-10 short bullet facts.
+     - Use context to infer/complete data logically.
+   - If insufficient data, score lower or set extracted_data to []/null.
+
+Output ONLY valid JSON, no other text:
+{{
+  "suitable_score": 0.85,
+  "reason": "1-2 sentence explanation of score and fit.",
+  "extracted_data": {example_data}  # Example; replace with actual extracted data matching schema {schema_hint} or null if unsuitable
+}}
+Ensure extracted_data is valid JSON-parseable and directly usable for rendering. Always provide structured data if score >=0.7, even if approximate."""
+
+    messages = [
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": f"""Context text from article section/paragraph:
+{context_text}
+
+Content hint: {content_hint}
+
+1. Score suitability for '{widget_type}' widget.
+2. If suitable (>=0.7), extract structured data as specified."""
+        }
+    ]
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            response_format={"type": "json_object"},
+            max_tokens=2000,
+            temperature=0.2,  # Lower for structured extraction
+        )
+        
+        content = response.choices[0].message.content.strip()
+        
+        # Clean markdown code blocks
+        if content.startswith("```json"):
+            content = content.split("```json")[1].split("```")[0].strip()
+        elif "```" in content:
+            parts = content.split("```")
+            content = parts[1].strip() if len(parts) > 1 and "json" in parts[0] else content
+        
+        result = json.loads(content)
+        
+        score = result.get("suitable_score", 0.0)
+        reason = result.get("reason", "")
+        extracted_data = result.get("extracted_data")
+        
+        if not isinstance(score, (int, float)):
+            score = 0.0
+            reason = "Invalid score format."
+            extracted_data = None
+        
+        print(f"    Suitability for {widget_type}: score {score} - {reason[:80]}...")
+        print(f"    Data extracted: { 'Yes ({len(extracted_data)} items)' if extracted_data else 'No' }")
+        
+        return score, reason, extracted_data
+            
+    except json.JSONDecodeError as je:
+        print(f"    JSON parse error: {str(je)[:100]}")
+        return 0.0, f"JSON parse error: {str(je)}", None
+    except Exception as e:
+        print(f"    Grok API error: {str(e)[:100]}")
+        return 0.0, f"Grok API error: {str(e)}", None
+
+
+def build_widget_slots_from_specs(widget_specs, article_view, api_key=None, model="grok-4-1-fast-non-reasoning"):
+    """
+    Process widget specs: extract context, assess suitability with Grok, generate HTML if suitable.
+    """
+    widget_slots = []
+    candidates = []
+    
+    print(f"Processing {len(widget_specs)} widget specs...")
+    for spec in widget_specs:
+        section_id = spec["section_id"]
+        paragraph_id = spec.get("paragraph_id")
+        position = spec.get("position", "after")
+        widget_type = spec["widget_type"]
+        content_hint = spec["content_hint"]
+        
+        print(f"  Building {widget_type} for section {section_id} {f'(para {paragraph_id})' if paragraph_id else '(after heading)'}...")
+        
+        # Extract context text
+        section = next((s for s in article_view["sections"] if s["id"] == section_id), None)
+        if not section:
+            print(f"    Section {section_id} not found, skipping.")
+            continue
+        
+        context_parts = [section["heading"]]
+        if paragraph_id:
+            para_dict = next((p for p in section["paragraphs"] if p["id"] == paragraph_id), None)
+            if para_dict:
+                context_parts.append(para_dict["text"])
+            else:
+                context_parts.extend(p["text"] for p in section["paragraphs"])
+                print(f"    Paragraph {paragraph_id} not found, using full section.")
+        else:
+            context_parts.extend(p["text"] for p in section["paragraphs"])
+        
+        context_text = "\n".join(context_parts)
+        if len(context_text) > 4000:
+            context_text = context_text[:4000] + "\n... (truncated for API)"
+        
+        # Assess and extract data
+        score, reason, extracted_data = assess_and_extract_data(context_text, content_hint, widget_type, api_key, model)
+        
+        print(f"    Suitability score: {score:.2f} - {reason[:60]}...")
+        
+        candidate = None
+        if extracted_data is not None:
+            html = render_widget(widget_type, extracted_data)
+            if html:
+                if score >= 0.5:
+                    widget_slots.append({
+                        "type": "widget",
+                        "section_id": section_id,
+                        "paragraph_id": paragraph_id,
+                        "position": position,
+                        "widget_type": widget_type,
+                        "widget_html": html,
+                    })
+                    print(f"    ✓ Added {widget_type} widget (score >=0.5)")
+                else:
+                    candidate = {
+                        "html": html,
+                        "score": score,
+                        "spec": spec,
+                        "section_id": section_id,
+                        "paragraph_id": paragraph_id,
+                        "position": position,
+                        "widget_type": widget_type,
+                    }
+                    print(f"    Candidate {widget_type} (low score {score:.2f})")
+            else:
+                print(f"    ✗ Render failed for {widget_type}")
+        else:
+            print(f"    ✗ No data extracted")
+        
+        if candidate:
+            candidates.append(candidate)
+    
+    # Fallback logic to ensure at least one widget
+    if not widget_slots and candidates:
+        best = max(candidates, key=lambda c: c["score"])
+        best_score = best["score"]
+        if best_score >= 0.3:
+            widget_slots.append({
+                "type": "widget",
+                "section_id": best["section_id"],
+                "paragraph_id": best["paragraph_id"],
+                "position": best["position"],
+                "widget_type": best["widget_type"],
+                "widget_html": best["html"],
+            })
+            print(f"    ✓ Fallback: Added best {best['widget_type']} (score {best_score:.2f}) to ensure at least one widget per page.")
+        else:
+            print(f"    No fallback: best score {best_score:.2f} too low")
+    
+    print(f"Generated {len(widget_slots)} widget slots.")
+    return widget_slots
+
 def main(html_file_path):
     load_dotenv()
     
@@ -271,18 +493,47 @@ def main(html_file_path):
         print(f"Error generating slots: {e}")
         return
 
-    # Step 4: Search for images and build final slots
-    print("\n4. Searching for images...")
-    suggested_slots = slots_data.get("slots", [])
-    if not suggested_slots:
-        print("No slots suggested.")
-        return
+    # Generate widget slot suggestions using article_view in memory
+    print("\n3.5 Generating widget slot suggestions with Grok...")
+    try:
+        widget_data = generate_widget_slots(
+            article=article_view,
+            output_path=None,  # Avoid writing intermediate file
+            max_slots=5
+        )
+        widget_specs = widget_data.get("slots", [])
+    except Exception as e:
+        print(f"Error generating widget specs: {e}")
+        widget_specs = []
+        widget_data = {"slots": []}
 
+    # Step 4: Search for images and build final slots
+    print("\n4. Building image slots...")
+    suggested_slots = slots_data.get("slots", [])
     final_slots = build_image_slots_from_specs(suggested_slots)
+    if not final_slots:
+        print("No image slots generated.")
+
+    print("\n4.5 Building widget slots...")
+    widget_final_slots = build_widget_slots_from_specs(widget_specs, article_view)
+    if not widget_final_slots:
+        print("No widget slots generated.")
+
+    if not final_slots and not widget_final_slots:
+        print("No slots to inject. Saving mutated HTML as-is.")
+        enhanced_html = mutated_html
+        # Optionally return here, but proceed to save
+    else:
+        print("\n5. Injecting images and widgets into HTML...")
+        all_slots = final_slots + widget_final_slots
+        print(f"  Total slots: {len(final_slots)} images + {len(widget_final_slots)} widgets")
+        enhanced_html = inject_slots_into_html(mutated_html, all_slots)
     
-    # Step 5: Inject images
-    print("\n5. Injecting images into HTML...")
-    enhanced_html = inject_images_into_html(mutated_html, final_slots)
+    # Step 5: Inject slots (images and widgets)
+    print("\n5. Injecting images and widgets into HTML...")
+    all_slots = final_slots + widget_final_slots
+    print(f"  Total slots: {len(final_slots)} images + {len(widget_final_slots)} widgets")
+    enhanced_html = inject_slots_into_html(mutated_html, all_slots)
     
     # Create output directory and save final file
     output_dir = Path("data/output")
