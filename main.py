@@ -156,14 +156,24 @@ Output ONLY a valid JSON object with no additional text:
             # Map back to original candidate index
             original_selected_index = available_candidates[selected_index][0]
             
-            print(f"    Grok selected image {original_selected_index}: {caption}")
+            print(f"    Grok selected image {original_selected_index}: {caption}\n")
             return original_selected_index, caption
                 
         except Exception as e:
             error_msg = str(e)
             
-            # Check if it's an unrecoverable data loss error
-            if "Unrecoverable data loss or corruption" in error_msg:
+            # Check if it's a retryable image fetch error
+            retryable_errors = [
+                "Unrecoverable data loss or corruption",
+                "Unsupported content-type",
+                "Fetching image failed",
+                "Fetching images over plain http://",
+                "Error code: 412",
+                "Error code: 403",
+                "Error code: 404"
+            ]
+            
+            if any(err in error_msg for err in retryable_errors):
                 print(f"    Error fetching image: {error_msg}")
                 
                 # Try to identify which image failed by checking all current candidates
@@ -171,7 +181,9 @@ Output ONLY a valid JSON object with no additional text:
                 # This is a heuristic - we'll exclude candidates one by one until we find working ones
                 if available_candidates:
                     failed_idx = available_candidates[-1][0]
+                    failed_url = candidates[failed_idx]["url"]
                     excluded_indices.add(failed_idx)
+                    print(f"    Failed image URL: {failed_url}")
                     print(f"    Excluding image {failed_idx} and retrying with remaining candidates...")
                     continue
             
@@ -192,7 +204,7 @@ def build_image_slots_from_specs(slot_specs):
         query = spec["search_query"]
         print(f"  Searching for: {query}")
         try:
-            candidates = search_images(query, num_results=5)  # Google/Bing/Wikimedia/etc.
+            candidates = search_images(query, num_results=7)  # Google/Bing/Wikimedia/etc.
         except Exception as e:
             print(f"    Error searching for '{query}': {e}")
             continue
