@@ -121,7 +121,7 @@ def main():
     )
     parser.add_argument(
         "--output-dir",
-        default="pages",
+        default="data/pages",
         help="Directory to save HTML files (default: pages/; created if missing). Each file is named based on the URL slug (e.g., Elon_Musk.html)."
     )
     parser.add_argument(

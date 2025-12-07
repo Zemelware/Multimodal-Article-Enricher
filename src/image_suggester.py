@@ -15,7 +15,7 @@ Requires:
 - XAI_API_KEY env var (export XAI_API_KEY=your_key from console.x.ai) or pass api_key=...
 - Deps: openai, httpx, python-dotenv
 
-Grok suggests slots with section/paragraph positions, image types, search queries, alt/caption hints, priority scores.
+Grok suggests slots with section/paragraph positions, image types, search queries, alt/caption hints, priority scores, and recommended dimensions for site-suited embedding.
 """
 
 import os
@@ -74,7 +74,16 @@ def generate_image_slots(
         max_slots: int = 10 - Max slots to suggest (Grok may suggest fewer)
     
     Returns:
-        {"slots": list of slot dicts}
+        Dict[str, Any] with "slots": List[Dict[str, Any]], where each slot dict contains:
+        - section_id: str
+        - paragraph_id: str or None
+        - position: str (e.g., "after", "after_heading")
+        - image_type: str (e.g., "photo", "diagram")
+        - search_query: str
+        - alt_text_hint: str
+        - caption_hint: str
+        - priority: float (0.0-1.0)
+        - recommended_dimensions: Dict[str, int] = {"width": int, "height": int}
     
     Raises:
         ValueError: Invalid input JSON or API response
@@ -143,6 +152,7 @@ Your task is to analyze an article and suggest optimal locations for images. For
 - Alt text hint for accessibility
 - Caption hint for the image
 - A priority score (0.0 to 1.0) indicating how important/valuable this image placement would be
+- Recommended image dimensions ({"width": integer, "height": integer} in pixels) that best suit the Grokipedia site layout and the suggested image's role in the article
 
 CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra text):
 
@@ -156,7 +166,8 @@ CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra tex
       "search_query": "young elon musk childhood photo",
       "alt_text_hint": "Elon Musk as a child.",
       "caption_hint": "Elon Musk during his early years in South Africa.",
-      "priority": 0.9
+      "priority": 0.9,
+      "recommended_dimensions": {"width": 600, "height": 400}
     },
     {
       "section_id": "sec_3",
@@ -166,7 +177,8 @@ CRITICAL: Return ONLY valid JSON in this exact format (no markdown, no extra tex
       "search_query": "falcon 9 reusable rocket diagram",
       "alt_text_hint": "Diagram of a SpaceX Falcon 9 reusable rocket.",
       "caption_hint": "A simplified view of SpaceX's reusable Falcon 9 rocket.",
-      "priority": 0.8
+      "priority": 0.8,
+      "recommended_dimensions": {"width": 800, "height": 600}
     }
   ]
 }
@@ -185,7 +197,13 @@ GUIDELINES:
 - Priority: 0.9-1.0 for critical images, 0.7-0.8 for important, 0.5-0.6 for nice-to-have, below 0.5 for optional
 - Search queries should be specific and descriptive
 - Alt text hints should be concise and descriptive
-- Caption hints should provide context or additional information"""
+- Caption hints should provide context or additional information
+- Recommended dimensions: Provide {"width": px, "height": px} suitable for embedding in Grokipedia articles. The site features a modern, responsive layout with Tailwind CSS. Tailor sizes to:
+  * Hero or lead images (e.g., after title or key sections): 1200x675 or similar wide aspect
+  * Inline images within paragraphs: 600x400 to 800x600 for readability without overwhelming text
+  * Diagrams, charts, infographics: 800x600 or square for clarity
+  * Small thumbnails or icons: 300x300 or less
+  Base on image_type and placement to ensure visual balance and fast loading."""
         },
         {
             "role": "user",
@@ -225,6 +243,13 @@ Return ONLY the JSON object with the slots array, no additional text or markdown
         
         if "slots" not in slots_data:
             raise ValueError("Response missing 'slots' key")
+        
+        # Optional: Validate each slot has required fields
+        required_fields = {"section_id", "position", "image_type", "search_query", "alt_text_hint", "caption_hint", "priority", "recommended_dimensions"}
+        for i, slot in enumerate(slots_data["slots"]):
+            missing = required_fields - set(slot.keys())
+            if missing:
+                raise ValueError(f"Slot {i} missing fields: {missing}")
         
         if output_path is not None:
             output_path_obj = Path(output_path)
