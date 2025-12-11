@@ -30,4 +30,4 @@ Use `main.py` for the full automated pipeline on scraped HTML:
 
 
 **Demo here**:
-- https://youtu.be/W2WxMBvier4
+- https://www.youtube.com/watch?v=U1GzlYcGK3I
