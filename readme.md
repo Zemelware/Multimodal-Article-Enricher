@@ -17,7 +17,7 @@ Use `main.py` for the full automated pipeline on scraped HTML:
 
 - **Prep**: `pip install -r requirements.txt` and set API keys in `.env`.
 - **Scrape** (if needed): Create `urls.txt` (one URL per line, e.g., https://grokipedia.com/page/Elon_Musk), run `python html_scraper.py --input-file urls.txt` → creates `data/pages/*.html` (default).
-- **Enhance**: `python main.py data/pages/article.html` → generates `data/output/{article_stem}_enhanced.html` with:
+- **Enhance**: `python main.py data/pages/article.html` → generates `data/output/{article_name}.html` with:
   - Images: Grok-suggested slots, searched via Google Custom Search, best selected via Grok vision analysis, inserted as <figure> with captions.
   - Widgets: Grok-suggested slots (e.g., timeline, key_facts), suitability validated per section via Grok, generated as self-contained HTML/CSS components, inserted as <div class="widget-slot">.
   All positioned precisely using injected IDs.
