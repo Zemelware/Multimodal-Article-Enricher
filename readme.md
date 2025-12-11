@@ -1,5 +1,7 @@
 # Grokipedia Image and Widget Enhancement Workflow
 
+https://github.com/user-attachments/assets/2f429d67-3d7e-495f-b02f-a1028d9f0863
+
 This README outlines the end-to-end workflow for scraping Grokipedia articles, suggesting and generating both image placements and custom widget components (e.g., timelines, fact panels) via Grok API, searching for images, validating widget suitability, and inserting everything into HTML for an enhanced, interactive article. 
 
 The process focuses on preserving original styling (inlined CSS) and using structured IDs for precise placements. The workflow is now fully implemented and chained via main.py for end-to-end processing.
@@ -29,5 +31,5 @@ Use `main.py` for the full automated pipeline on scraped HTML:
 - Preserves original styles; inserts <img> with alt/caption; supports recommended_dimensions for sizes (future: add width/height attrs).
 
 
-**Demo here**:
-- https://www.youtube.com/watch?v=U1GzlYcGK3I
+**Full Demo Jere**:
+- Full demo with explanation: https://www.youtube.com/watch?v=U1GzlYcGK3I
